@@ -1,0 +1,18 @@
+do $$
+declare v_str text;
+		v_name varchar(100);
+begin
+
+for v_name in select name
+from dbo._tmp_login tmp loop
+
+
+v_str:='select dbo.admin_add_user (v_cloginname:= ''' ||v_name||''');' ;
+raise notice '%',v_str;
+
+end loop;
+
+
+
+end;
+$$;

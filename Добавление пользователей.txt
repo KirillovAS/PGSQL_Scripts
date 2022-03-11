@@ -1,0 +1,19 @@
+select * from dbo._tmp_login
+select * from dbo.s_users order by link desc
+
+--insert into dbo.s_users (name, loginame, type, type_desc, fio, post, phone, email)
+select note, login, 'S', 'SQL_USER', fio, position, phone, email
+from dbo._tmp_login
+where id=1
+
+--update dbo.s_users
+set user_type=1, work_id=64
+where uid=879
+
+
+select
+	'exec admin_add_user @cLoginName = ''' + SU.LOGINAME + ''', @nBitComplexId = 64, @cNote = ''' + SU.NAME + ''''
+from dwh_12_2.dbo.S_USERS SU where TYPE = 'S' and not exists(select * from dbo.S_USERS where SU.LOGINAME = LOGINAME)
+
+--delete from dbo.s_users
+where uid=878

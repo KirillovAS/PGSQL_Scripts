@@ -1,0 +1,1 @@
+to_char([Результат].[finansirovanie_narushenie_data_sovershenia], 'YYYY-MM-DD') date_char
