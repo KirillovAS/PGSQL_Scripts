@@ -1,0 +1,300 @@
+CREATE OR REPLACE FUNCTION dbo._rospis_utochnenie(v_urid uuid DEFAULT NULL::uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+
+--------------------------------------
+declare 
+v_docid integer;
+v_ProtRID uuid;
+v_DataXml varchar;
+v_header character varying;
+v_str character varying;
+
+begin
+
+--create temp table docid on commit drop as
+--select 21 as docid;
+
+create temp table docid on commit drop as
+select int as docid from dbo.sys_values where rid=v_uRid and CODE  = 'ElementId';
+
+while exists (select * from docid)
+loop
+--цикл по каждому документу
+v_docid :=  (select docid from docid limit 1);
+--====================================
+
+drop table if exists prj;
+create temp table prj (
+	--rid uniqueidentifier
+	--,
+	 DocID int
+	,ID_P_ID int
+	,ID_P_PER int
+	,ID_P_BUD int
+	,ID_P_VER int	
+	,ID_P_VER_CODE int
+	,ID_P_VED int
+	,ID_P_SENDER_ACC int
+	,Data int
+
+	,ID_P_CORR int
+	,ID_P_RECIP_ACC int
+	,ID_P_PR int
+	,ID_P_VR int
+	,ID_P_CS int
+	,ID_P_KOSGU int
+	,ID_P_DK int
+	,ID_P_RK int
+	,ID_P_FIN int
+	,ID_P_RP int
+	,ID_P_TIP_RO int
+	,summ1_p money
+	,summ2_p money
+	,summ3_p money) on commit drop;
+------------------------------------------
+--  Выборка строк из утвержденной справки
+------------------------------------------
+
+insert into prj
+select
+	--@uRid as rid
+	--,
+	DOCUMENTID as DocID
+	,t.id as ID_P_ID
+	,t.CL_2561 as ID_P_PER
+	,t.CL_2532 as ID_P_BUD
+	,t.CL_2534 as ID_P_VER
+	,cast(t2.at_2452 as int) as ID_P_VER_CODE
+	,t.CL_2533 as ID_P_VED
+	,t.CL_4144 as ID_P_SENDER_ACC
+	,t.AT_2562 as Data
+
+	,p.CL_2535 as ID_P_CORR
+	,p.CL_4143 as ID_P_RECIP_ACC
+	,p.CL_2536 as ID_P_PR
+	,p.CL_2537 as ID_P_VR
+	,p.CL_2538 as ID_P_CS
+	,p.CL_2539 as ID_P_KOSGU
+	,p.CL_2540 as ID_P_DK
+	,p.CL_2541 as ID_P_RK
+	,p.CL_2542 as ID_P_FIN
+	,p.CL_2543 as ID_P_RP
+	,p.CL_2547 as ID_P_TIP_RO
+	,sum(p.AT_2550) as summ_u1
+	,sum(p.AT_2553) as summ_u2
+	,sum(p.AT_2556) as summ_u3
+from KS_DDLControl.DS_943_2520 t
+  inner join KS_DDLControl.DS_943_2524 p on t.ID=p.id_up
+  inner join ks_ddlcontrol.cl_930_2412 t2 on t.CL_2534=t2.id
+where 
+v_docid = t.id 
+--t.id =2
+and (p.AT_2550+p.AT_2553+p.AT_2556)<>0
+group by
+
+     DOCUMENTID
+    ,t.id
+	,t.CL_2561
+	,t.CL_2532
+	,t.CL_2534
+	,t2.at_2452
+	,t.CL_2533
+	,t.CL_4144
+	,t.AT_2562
+
+	,p.CL_2535
+	,p.CL_4143
+	,p.CL_2536
+	,p.CL_2537
+	,p.CL_2538
+	,p.CL_2539
+	,p.CL_2540
+	,p.CL_2541
+	,p.CL_2542
+	,p.CL_2543
+	,p.CL_2547;
+
+
+--Проверка на наличие следующей версии в спр-ке
+if not exists(select 1 from prj p
+inner join ks_ddlcontrol.cl_930_2412 ver
+on cast(p.ID_P_VER_CODE as int)+1=cast(ver.at_2452 as int) limit 1)
+then
+	begin
+	v_str:='Следующей версии нет в спр' ;
+	raise notice '%',v_str;
+	--print 'Следующей версии нет в спр';
+	 perform dbo.xmldesccolumns (
+	 v_header :='<SPAN ID=WARN>Следующей версии нет в справочнике, документ не создан</SPAN>'
+	,v_protrid := v_uRid);
+	return;
+	end;
+else 
+	begin
+	--print 'Следующей версия есть в спр, продолжаем';
+	v_str:='Следующая версия есть в спр, продолжаем' ;
+	raise notice '%',v_str;
+	end;
+ end if;
+
+
+-- Создание таблицы для вывода шапки дока в протоколе
+create temp table protocol_shapka on commit drop as
+select distinct
+	 ID_P_ID
+	,ID_P_PER
+	,per.at_2557 as PER_code
+	,ID_P_BUD
+	,bud.at_2442 as BUD_code
+	,ID_P_VER	
+	,ver.at_2452 as VER_code
+	,ID_P_VED
+	,ved.at_2447 as VED_code
+	,ID_P_SENDER_ACC
+	,coalesce(acc.at_3977,'Не указан') as SENDER_ACC
+	,Data
+from prj p
+join ks_ddlcontrol.cl_945_2548 per on p.ID_P_PER=per.id
+join ks_ddlcontrol.cl_928_2399 bud on p.ID_P_BUD=bud.id
+join ks_ddlcontrol.cl_930_2412 ver on p.ID_P_VER=ver.id
+join ks_ddlcontrol.cl_929_2405 ved on p.ID_P_VED=ved.id
+join ks_ddlcontrol.cl_1097_4168 acc on p.ID_P_SENDER_ACC=acc.id;
+
+--perform dbo.print_q('select * from protocol_shapka');
+--return;
+
+
+
+-- создание документа в проектировании по текущему документу
+if not exists (
+select * from prj t1
+inner join KS_DDLControl.DS_943_2520 t2
+on 
+coalesce(cast(t1.ID_P_PER as varchar),'')||coalesce(cast(t1.ID_P_BUD as varchar),'')||coalesce(cast(t1.ID_P_VER+1 as varchar),'')||coalesce(cast(t1.ID_P_VED as varchar),'')||coalesce(cast(t1.ID_P_SENDER_ACC as varchar),'')=
+coalesce(cast(t2.CL_2561 as varchar),'')||coalesce(cast(t2.CL_2532 as varchar),'')||coalesce(cast(t2.CL_2534 as varchar),'')||coalesce(cast(t2.CL_2533 as varchar),'')||coalesce(cast(t2.CL_4144 as varchar),'')
+)
+then 
+
+insert into KS_DDLControl.DS_943_2520 (documentid, CL_2561, CL_2532, CL_2534, CL_2533, CL_4144, AT_2562) 
+select
+  DocID as documentid
+ ,ID_P_PER as period -- период  
+ ,ID_P_BUD as budjet --бюджет
+ ,ID_P_VER+1 as ver -- версия
+ ,ID_P_VED as dep  --ведомство
+ ,ID_P_SENDER_ACC as sender -- счет отправителя
+ ,Data
+from
+	prj
+group by 
+  DocID
+ ,ID_P_PER
+ ,ID_P_BUD
+ ,ID_P_VER
+ ,ID_P_VED
+ ,ID_P_SENDER_ACC
+ ,Data;
+ 
+insert into KS_DDLControl.DS_943_2524 (ID_UP, CL_2535, CL_4143, CL_2536 ,CL_2537 ,CL_2538 ,CL_2539 ,CL_2540 ,CL_2541 ,CL_2542 ,CL_2543 ,CL_2547, AT_2548, AT_2550, AT_2551, AT_2553, AT_2554, AT_2556)
+select 
+ (select pr.id from KS_DDLControl.DS_943_2520 pr 
+       inner join prj gr on coalesce(cast(pr.CL_2534 as varchar),'')=coalesce(cast(gr.ID_P_VER+1 as varchar),'') and coalesce(cast(pr.CL_2533 as varchar),'')=coalesce(cast(gr.ID_P_VED as varchar),'') and coalesce(cast(pr.CL_2561 as varchar),'')=coalesce(cast(gr.ID_P_PER as varchar),'') and coalesce(cast(pr.CL_2532 as varchar),'')=coalesce(cast(gr.ID_P_BUD as varchar),'') and coalesce(cast(pr.CL_4144 as varchar),'')=coalesce(cast(gr.ID_P_SENDER_ACC as varchar),'') and coalesce(cast(pr.AT_2562 as varchar),'')=coalesce(cast(gr.data as varchar),'') limit 1)
+ 	,ID_P_CORR as CORR
+ 	,ID_P_RECIP_ACC as RECIP_ACC
+	,ID_P_PR as PR
+	,ID_P_VR as VR
+	,ID_P_CS as CS
+	,ID_P_KOSGU as KOSGU
+	,ID_P_DK as DK
+	,ID_P_RK as RK
+	,ID_P_FIN as FIN
+	,ID_P_RP as RP
+	,ID_P_TIP_RO as TIP_RO
+ ,summ1_p as summ11
+ ,summ1_p as summ12
+ ,summ2_p as summ21
+ ,summ2_p as summ22
+ ,summ3_p as summ31
+ ,summ3_p as summ32
+  from prj
+         where 1=1
+     and coalesce(ID_P_CORR,0)+
+     coalesce(ID_P_PR,0)+
+     coalesce(ID_P_VR,0)+
+     coalesce(ID_P_CS,0)+
+     coalesce(ID_P_KOSGU,0)+
+     coalesce(ID_P_DK,0)+
+     coalesce(ID_P_RK,0)+
+     coalesce(ID_P_FIN,0)+
+     coalesce(ID_P_RP,0)+
+     coalesce(ID_P_TIP_RO,0)<>0;
+
+
+--Печать протокола начало
+v_Header := '<span class=info>Протокол выполнения действия</span>';
+perform dbo.xmlheader (v_Header := v_Header, v_ProtRID := v_uRid);
+
+perform dbo.xmldesccolumns (
+	 v_header :='<SPAN><font color=#008000><b>Документ успешно создан, для отображения обновите список документов</b></font></SPAN><SPAN><b></BR></BR>	Параметры текущего документа:</BR></b></SPAN>'
+	,v_columns := 'PER_code,BUD_code,VER_code,VED_code,SENDER_ACC,Data'
+	,v_columnheaders := 'Период.Код,Бюджет.Код,Версия.Код,Ведомство.Код,Счет отправителя,Дата Документа'
+	,v_columntype := 'c,c'
+	--,v_groupheader := '<span id=info>&nbsp;Дата: @dt </span>'
+	--,v_groupby := 'DocID'
+	,v_protrid := v_uRid);
+
+v_dataxml := (select xmlelement(name "data", (select xmlagg(cxml) from (
+								select xmlelement(name "row", xmlattributes(
+									 PER_code
+									,BUD_code
+									,VER_CODE
+									,VED_code
+									,SENDER_ACC
+									,Data)) as cxml
+									from protocol_shapka) tab_xml)));
+
+perform dbo.xmlvalcolumns (v_dataxml := v_dataxml, v_protrid := v_uRid);
+--Печать протокола конец
+
+else
+--Печать протокола начало
+		 v_Header := '<span class=info>Протокол выполнения действия</span>';
+		 perform dbo.xmlheader (v_Header := v_Header, v_ProtRID := v_uRid);
+
+		 perform dbo.xmldesccolumns (
+			 v_header :='<SPAN><b>Документ со следующей версией уже существует, для отображения обновите список документов</b></SPAN><SPAN><b></BR></BR>	Параметры текущего документа:</BR></BR></b></SPAN>'
+			,v_columns := 'PER_code,BUD_code,VER_code,VED_code,SENDER_ACC,Data'
+			,v_columnheaders := 'Период.Код,Бюджет.Код,Версия.Код,Ведомство.Код,Счет отправителя,Дата Документа'
+			,v_columntype := 'c,c'
+			,v_protrid := v_uRid);	
+		
+		 v_dataxml := (select xmlelement(name "data", (select xmlagg(cxml) from (
+			select xmlelement(name "row", xmlattributes(
+				 PER_code
+				,BUD_code
+				,VER_CODE
+				,VED_code
+				,SENDER_ACC
+				,Data)) as cxml
+				from protocol_shapka) tab_xml)));
+		 perform dbo.xmlvalcolumns (v_dataxml := v_dataxml, v_protrid := v_uRid);
+			
+	--Печать протокола конец
+
+
+end if;
+--====================================
+
+delete from docid where docid=v_docid;
+drop table prj;
+drop table protocol_shapka;
+end loop;
+end;
+--------------------------------------
+
+
+$function$
+;

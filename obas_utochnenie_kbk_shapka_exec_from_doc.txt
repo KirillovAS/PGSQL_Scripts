@@ -1,0 +1,296 @@
+CREATE OR REPLACE FUNCTION dbo._obas_utochnenie_kbk_shapka_exec_from_doc(v_urid uuid DEFAULT NULL::uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+
+--Хп состоит из двух частей, в первой части проводится уточненение ОБАС, во второй - документа сопоставления
+declare
+v_docid int; --id дока, с которого вызываем хп
+--переменные для протокола
+v_ProtRID uuid;
+v_DataXml varchar;
+v_header character varying;
+--переменные для штатной хп клонирования
+v_levels int;
+v_tbl varchar(128);
+v_tbl_parent varchar(128);
+v_str text;
+v_fields text;
+v_entityid int;
+v_eodguid varchar(40);
+v_errmsg varchar(4000);
+v_cprefixclone varchar(10);
+--переменные для уточнения ОБАС
+v_oldPeriod varchar(4);
+v_oldVer varchar(10);
+v_newPeriod varchar(4);
+v_newVer varchar(10);
+v_oldPeriodId int;
+v_oldVerId int;
+v_newPeriodId int;
+v_newVerId int;
+
+
+begin
+
+select int from dbo.sys_values into v_docid where rid=v_uRid and CODE  = 'ElementId';
+--v_docid:= 1;
+--Переменные для 1-ой части 
+v_cprefixclone := 'clone_';
+v_entityid := 1056;
+
+----Переменные для 2-ой части
+--v_oldPeriodId := id from ks_ddlcontrol.cl_945_2548 where at_2557=v_period;
+--v_oldVerId := id from ks_ddlcontrol.cl_930_2412 where at_2452=v_oldVer;
+--v_newVerId := id from ks_ddlcontrol.cl_930_2412 where at_2452=v_newVer;
+---- id источника
+--Определяем id элементов в шапке дока (Старые и новые версии и периоды)
+v_oldPeriodId :=(select cl_112743 from ks_ddlcontrol.ds_1376_6677 where id=v_docid);
+v_oldVerId :=(select cl_112745 from ks_ddlcontrol.ds_1376_6677 where id=v_docid);
+v_newPeriodId :=(select cl_112744 from ks_ddlcontrol.ds_1376_6677 where id=v_docid);
+v_newVerId :=(select cl_112746 from ks_ddlcontrol.ds_1376_6677 where id=v_docid);
+
+--Определяем их коды
+v_oldPeriod :=(select at_2557 from ks_ddlcontrol.cl_945_2548 where id=v_oldPeriodId);
+v_oldVer :=(select at_2452 from ks_ddlcontrol.cl_930_2412 where id=v_oldVerId);
+v_newPeriod :=(select at_2557 from ks_ddlcontrol.cl_945_2548 where id=v_newPeriodId);
+v_newVer :=(select at_2452 from ks_ddlcontrol.cl_930_2412 where id=v_newVerId);
+
+
+--raise notice '%,%,%,%',v_oldPeriod,v_oldVer,v_newPeriod,v_newVer;
+----perform dbo.print_q('select v_oldPeriod');
+--perform dbo.print_q('select 1');
+--return;
+
+
+--первая часть, уточнение ОБАС
+------------------------------------
+--Переменные для 1-ой части 
+v_cprefixclone := 'clone_';
+v_entityid := 1056;
+
+v_eodguid := dbo.sys_guid();
+--'a5a2c68b-5792-4aee-8039-7b8a5289ae30' -- guid клонируемых данных 
+--raise notice '%',v_eodguid;
+drop table if exists tmp_stru;
+create temporary table tmp_stru (levels int, tbl varchar(128), tbl_parent varchar(128)) on commit drop;
+create temporary table tmp_del_oldid (id int) on commit drop;
+perform dbo.ds_clone (v_nentityid := v_entityid);
+insert into tmp_stru (levels, tbl, tbl_parent)
+select distinct levels, tbl, tbl_parent from dbo.entitystru(v_entityid);
+while exists(select 1 from tmp_stru) loop
+
+	select  levels , tbl, tbl_parent into  v_levels, v_tbl ,v_tbl_parent from tmp_stru order by levels, tbl;
+--raise notice '%', v_levels;
+--return;
+	v_fields := (select string_agg(',a.' ||attr,'') from dbo.entitystru(v_entityid) where tbl = v_tbl);
+if v_levels = 2 then
+		-- удаляем "старые" клонированные данные
+		v_str := 'insert into tmp_del_oldid (id)
+		select id from ks_ddlcontrol.' || v_tbl || ' where eodguid = ''' || cast(v_eodguid as text) || '''::uuid;';
+execute(v_str);
+if exists(select 1 from tmp_del_oldid) then
+			perform dbo.del_step (v_prim_table := v_tbl, v_prim_col := 'id', v_prim_val_tab := 'tmp_del_oldid');
+end if;
+v_str := ' 
+		insert into ks_ddlcontrol.' || v_cprefixclone || v_tbl || ' (id,documentid' || replace(v_fields,'a.','') || ')
+		select a.id,a.documentid' || v_fields || ' from ks_ddlcontrol.' || v_tbl || ' a
+				left join (select t2.* from ks_ddlcontrol.ds_1056_3668 t2 
+						where 
+						t2.cl_3518='''|| cast(v_newVerId as varchar(10))|| '''
+						and t2.cl_3520='''|| cast(v_newPeriodId as varchar(10))|| '''
+						)	 b
+		    on a.documentid=b.documentid
+			and coalesce(a.cl_3516,0)=coalesce(b.cl_3516,0) -- Бюджет
+			and coalesce(a.cl_4396,0)=coalesce(b.cl_4396,0) -- Макет Счета корреспондентов (отправители)
+			and coalesce(a.cl_3517,0)=coalesce(b.cl_3517,0) -- Макет Ведомства
+			and coalesce(a.cl_3519,0)=coalesce(b.cl_3519,0) -- Макет Корреспонденты
+			and coalesce(a.cl_4397,0)=coalesce(b.cl_4397,0) -- Макет Счета корреспондентов (получатели)
+			and coalesce(a.cl_3521,0)=coalesce(b.cl_3521,0) -- Макет Подразделы
+			and coalesce(a.cl_3523,0)=coalesce(b.cl_3523,0) -- Макет Целевые статьи
+			and coalesce(a.cl_3522,0)=coalesce(b.cl_3522,0) -- Макет Виды расходов
+			and coalesce(a.cl_3524,0)=coalesce(b.cl_3524,0) -- Макет КОСГУ
+			and coalesce(a.cl_3525,0)=coalesce(b.cl_3525,0) -- Макет Дополнительная классификация
+			and coalesce(a.cl_3526,0)=coalesce(b.cl_3526,0) -- Макет Региональная классификация
+			and coalesce(a.cl_3527,0)=coalesce(b.cl_3527,0) -- Макет Источники финансирования
+			and coalesce(a.cl_3529,0)=coalesce(b.cl_3529,0) -- Макет Тип расходных обязательств
+			and coalesce(a.cl_3528,0)=coalesce(b.cl_3528,0) -- Макет Расходные полномочия                                                                     
+			where
+					a.cl_3518=''' ||cast(v_oldVerId as varchar(10))|| '''
+					and a.cl_3520=''' ||cast(v_oldPeriodId as varchar(10))|| '''
+                    and b.id is null 
+                    --and documentid is null -- переносим все данные
+			;';
+--perform dbo.print_q('select * from ks_ddlcontrol.' || v_cPrefixClone || v_tbl);
+               --perform dbo.print_q('select * from ks_ddlcontrol.clone_ds_1166_4887');
+	end if;
+	
+--raise notice 'dfgdfg';
+--raise notice '%',v_str;
+--return;
+
+	if v_levels > 2 then
+		v_fields := replace(v_fields,'a.','');
+v_str := ' 
+		insert into ks_ddlcontrol.' || v_cprefixclone || v_tbl || ' (id,id_up' || v_fields || ')
+		select id,id_up' || v_fields || ' from ks_ddlcontrol.' || v_tbl || ' t1
+		where exists (select 1 from ks_ddlcontrol.' || v_cprefixclone || v_tbl_parent || ' t2 where t1.id_up = t2.id)
+		;';
+end if;
+--raise notice '%', v_str;
+
+	execute(v_str);
+v_fields := replace(v_fields,'a.','');
+v_str := 'update ks_ddlcontrol.' || v_cprefixclone || v_tbl || ' set eodguid= ''' || cast(v_eodguid as text) || ''' , guid= dbo.sys_guid();';
+execute(v_str);
+-- меняем в нужной таблице значение справочника 
+	if v_tbl = 'ds_1056_3668' then
+		v_str := 'update ks_ddlcontrol.' || v_cprefixclone || v_tbl || ' set cl_3518= ' || cast(v_newver as varchar(10))|| ';';
+execute(v_str);
+end if;
+delete from tmp_stru where v_levels = levels and v_tbl = tbl;
+end loop;
+--raise notice '%',v_period||' -1';
+perform dbo.ds_save (v_nentityid := v_entityid, v_clistattr := 'at_1,at_2');
+perform dbo.ds_clone_del (v_nentityid := v_entityid);
+/*exception
+	when others then
+	raise notice 'sqlstate = %, sqlerrm = %', sqlstate, sqlerrm;*/
+--end;
+
+
+--Вторая часть
+------------------------------------------------------------
+drop table if exists prj;
+create temp table prj (
+	 document int
+	,per int
+	,bud int
+	,ver int	
+	,ved int
+
+	,forma_obas int
+	,sender_acc int
+	,kor int
+	,recip_acc int
+	,prz int
+	,vr int
+	,cs int
+	,kosgu int
+	,dop int
+	,reg int
+	,ist_fin int
+	,rp int
+	,tip_ro int) on commit drop;
+insert into prj
+	select distinct
+	--@uRid as rid
+	--,
+	 t1.documentid -- document
+	,t1.cl_6004 -- per
+	,t1.cl_6001 -- bud
+	,t1.cl_6003 -- ver
+	,t1.cl_6002 -- ved	
+	
+	,t2.cl_6015 -- forma_obas
+	,t2.cl_6016 -- sender_acc
+	,t2.cl_6005 -- corr
+	,t2.cl_6017 -- recip_acc
+	,t2.cl_6006 -- prz
+	,t2.cl_6007 -- vr
+	,t2.cl_6008 -- cs
+	,t2.cl_6009 -- kosgu
+	,t2.cl_6010 -- dk
+	,t2.cl_6011 -- rk
+	,t2.cl_6012 -- ist_fin
+	,t2.cl_6013 -- rp
+	,t2.cl_6014 -- tip_ro
+	from ks_ddlcontrol.ds_1196_6232 t1
+	inner join ks_ddlcontrol.ds_1196_6237 t2 on t1.id=t2.id_up
+	where 
+	--t1.id=1;
+	t1.cl_6004=v_oldPeriodId
+	and t1.cl_6003=v_oldVerId;
+--@docid = t.id 
+	
+--select  * from 	prj;
+
+	-- создание документа в проектировании по текущему документу
+if not exists
+(select * from prj t1
+inner join KS_DDLControl.ds_1196_6232 t2
+on 
+coalesce(cast(v_newPeriodId as varchar),'')||coalesce(cast(t1.bud as varchar),'')||coalesce(cast(v_newVerId as varchar),'')||coalesce(cast(t1.ved as varchar),'')=
+coalesce(cast(t2.cl_6004 as varchar),'')||coalesce(cast(t2.cl_6001 as varchar),'')||coalesce(cast(t2.cl_6003 as varchar),'')||coalesce(cast(t2.cl_6002 as varchar),''))
+--return
+then
+
+insert into KS_DDLControl.ds_1196_6232 (documentid, cl_6004, cl_6001, cl_6003, cl_6002) 
+select distinct
+  document -- documentid
+ ,per -- период  
+ ,bud -- бюджет
+ ,v_newVerId -- версия
+ ,ved -- ведомство
+from prj;
+insert into ks_ddlcontrol.ds_1196_6237 (
+	 id_up
+	,cl_6015 -- forma_obas
+	,cl_6016 -- sender_acc
+	,cl_6005 -- corr
+	,cl_6017 -- recip_acc
+	,cl_6006 -- prz
+	,cl_6007 -- vr
+	,cl_6008 -- cs
+	,cl_6009 -- kosgu
+	,cl_6010 -- dk
+	,cl_6011 -- rk
+	,cl_6012 -- ist_fin
+	,cl_6013 -- rp
+	,cl_6014) -- tip_ro
+select 
+ (select t1.id from KS_DDLControl.ds_1196_6232 t1 
+       inner join prj t2 on coalesce(cast(t1.cl_6003 as varchar),'')=coalesce(cast(v_newVerId as varchar),'') and coalesce(cast(t1.cl_6002 as varchar),'')=coalesce(cast(t2.ved as varchar),'') and coalesce(cast(t1.cl_6004 as varchar),'')=coalesce(cast(t2.per as varchar),'') and coalesce(cast(t1.cl_6001 as varchar),'')=coalesce(cast(t2.bud as varchar),'') limit 1)
+	,forma_obas
+	,sender_acc
+	,kor
+	,recip_acc
+	,prz
+	,vr
+	,cs
+	,kosgu
+	,dop
+	,reg
+	,ist_fin
+	,rp
+	,tip_ro
+  from prj
+  where 1=1;
+end if;
+
+--Печать протокола. Начало
+		begin
+		     	--вызываем протокол о выполнении
+			    --протокол об успешном выполнении
+				--set @header='<span>Документ со следующей версией уже существует</span>'
+				
+				v_Header := '<span class=info>Протокол выполнения действия</span>';
+				perform dbo.xmlheader (v_Header := v_Header, v_ProtRID := v_uRid);
+				
+				perform dbo.xmldesccolumns (
+					 v_header :='<SPAN><font color=#008000><b>Действие успешно выполненено, для отображения обновите списки документов</b></SPAN>'
+					--,v_columns := 'M_Podraz_code,M_Cel_Stat_code,M_Vid_Ras_code,Utoch_OchG,Utoch_PerG,Utoch_VtorG'
+					--,v_columnheaders := 'Подраздел.Код,Целевая_статья.Код,Вид_расходов.Код,Сумма_Очг,Сумма_Пл1,Сумма_Пл2'
+					--,v_columntype := 'c,c'
+					--,v_groupheader := '<span id=info>&nbsp;Дата: @dt </span>'
+					--,v_groupby := 'DocID'
+					,v_protrid := v_uRid);
+		end;
+
+exception
+	when others then
+	raise notice 'sqlstate = %, sqlerrm = %', sqlstate, sqlerrm;
+end;
+$function$
+;

@@ -1,0 +1,209 @@
+--==============================
+--Character-Manipulative Functions
+--==============================
+select 'Post' || 'greSQL'
+select lower('TOM')
+select upper('tom')
+select position('om' in 'Thomas')
+select substring('Thomas' from 2 for 3)
+select concat('abcde', 2, NULL, 22)
+select concat_ws('—', first_nm, middle_nm, last_nm) from table
+select length('jose')
+select repeat('Pg', 4)
+select replace('abcdefabcdef', 'cd', 'XX')	
+select reverse('abcde')
+select substr('alphabet', 3, 2)
+
+
+--==============================
+--Window functions
+--==============================
+--CUME_DIST	Return the relative rank of the current row.
+--DENSE_RANK	Rank the current row within its partition without gaps.
+--FIRST_VALUE	Return a value evaluated against the first row within its partition.
+--LAG	Return a value evaluated at the row that is at a specified physical offset row before the current row within the partition.
+--LAST_VALUE	Return a value evaluated against the last row within its partition.
+--LEAD	Return a value evaluated at the row that is offset rows after the current row within the partition.
+--NTILE	Divide rows in a partition as equally as possible and assign each row an integer starting from 1 to the argument value.
+--NTH_VALUE	Return a value evaluated against the nth row in an ordered partition.
+--PERCENT_RANK	Return the relative rank of the current row (rank-1) / (total rows – 1)
+--RANK	Rank the current row within its partition with gaps.
+--ROW_NUMBER	Number the current row within its partition starting from 1.
+ROW_NUMBER () OVER (PARTITION BY group_name ORDER BY price)
+
+
+--==============================
+--Advanced Functions
+--==============================
+--Конверты
+SELECT CAST ('100' AS INTEGER);
+SELECT cast(123 as varchar)
+SELECT CAST(800 AS TEXT)
+SELECT CAST(2400 AS MONEY)
+SELECT CAST ('2020-01-01' AS DATE),
+SELECT 123::text
+SELECT '2019-06-15 14:30:20'::timestamp;
+SELECT '15 minute'::interval
+--Other
+--Aggregate function that concatenates a list of strings and places a separator between them
+--Like other aggregate functions is often used with the GROUP BY clause
+SELECT STRING_AGG (email, ';') email_list
+SELECT format('Hello %s', 'World');
+COALESCE(discount, 0)
+
+
+--==============================
+--Arrays
+--==============================
+--Кол-во эл-ов в массиве
+array_length(string_to_array(amenities, ','), 1)
+
+--Массив в строки
+unnest(string_to_array(amenities_mod1, ','))
+
+
+--====================================
+--Функции дат
+--====================================
+--текущая дата в формате timestamp with time zone
+select now()
+
+--текущая дата в формате date
+select current_date
+
+--текущая время в формате time with time zone
+select current_time
+
+--текущая время в формате timestamp
+select current_timestamp
+
+--конверт даты в строку формата 'yyyymmdd'
+to_char(date '2001-02-16', 'yyyy-mm')
+select to_char(now(), 'MM')
+
+--конверт строки в дату формата 'yyyy-mm'
+select to_date('20170103','yyyymmdd');
+select to_date('10 feb 2017', 'dd mon yyyy');
+
+--function converts a string to a timestamp
+select to_timestamp('2017-03-31 9:30:20','yyyy-mm-dd hh:mi:ss')
+
+--вычитает дату/время в формате interval
+select age(timestamp '2001-04-10', timestamp '1957-06-13')
+select age(timestamp '1957-06-13')
+
+--retrieves a field such as a year, month, and day from a date/time value
+select extract(year from timestamp '2016-12-31 13:30:15');
+select extract(month from timestamp '2016-12-31 13:30:15');
+select extract(day from date '2016-12-31');
+select to_char(now(), 'MM')
+
+--extracts a subfield from a date or time value
+select date_part('month',timestamp '2017-09-30');
+select date_part('day',date '2017-09-30');
+
+--интервалы дат 1
+select
+  age('2012-03-05', '2010-04-01'),
+  date_part('year', age('2012-03-05', '2010-04-01')) as years,
+  date_part('month', age('2012-03-05', '2010-04-01')) as months,
+  date_part('day', age('2012-03-05', '2010-04-01')) as days;
+ 
+--интервалы дат 2
+--'2001-02-16 20:38:40'
+select to_char(timestamp '2001-02-16 20:38:40', 'yyyy-mm')
+select to_date(to_char(date '2001-02-16', 'yyyy-mm'),'yyyy-mm')
+select to_date(to_char(date '2001-02-16', 'yyyy-mm'),'yyyy-mm') + interval '1 month'
+select to_char(to_date(to_char(date '2001-02-16', 'yyyy-mm'),'yyyy-mm') + interval '1 month','yyyy-mm')
+
+--'2001-02-16'
+select date '2001-02-16' + interval '1 month'
+select to_char(date '2001-02-16' + interval '1 month','yyyy-mm')
+
+--интервалы дат 3
+select '2023-01-09' :: date - '2023-01-01' :: date;
+
+--прочие конверты
+select date(current_timestamp)+ interval '1 month'
+select current_date + interval '1 month'
+select cast('2023-01-09 20:41:12.791354-08' as date);
+select to_char(now(), 'yyyy-mm-dd') as current_date;
+select '2023-01-09 20:41:12.791354-08' :: date;
+
+
+--==============================
+--Code examples
+--==============================
+--OFFSET, FETCH
+SELECT
+    film_id,
+    title
+FROM
+    film
+ORDER BY
+    title 
+OFFSET 5 ROWS 
+FETCH FIRST 10 ROW ONLY;
+
+--Copy Table with the Same Structure and No Data
+CREATE TABLE new_table AS TABLE old_table WITH NO DATA;
+
+--IF Statement
+DO $$
+DECLARE
+  a integer := 10;
+  b integer := 20;
+BEGIN 
+  IF a > b THEN
+    RAISE NOTICE 'a is greater than b';
+  END IF;
+END $$;
+
+--LOOP
+do $$
+declare
+  n integer:= 6;
+  cnt integer := 1 ;  
+begin
+loop  
+ exit when cnt = n ;
+ raise notice '%', cnt;  
+ cnt := cnt + 1 ;  
+end loop;  
+end; $$;
+
+--For
+do $$
+begin
+   for cnt in reverse 10..1 loop
+      raise notice 'cnt: %', cnt;
+   end loop;
+end; $$
+
+--CTE
+WITH cte_film AS  (
+    SELECT film_id,
+        title,
+        rating,
+        length,
+        RANK() OVER (
+            PARTITION BY rating
+            ORDER BY length DESC) 
+        length_rank
+    FROM 
+        film
+)
+SELECT *
+FROM cte_film
+WHERE length_rank = 1;
+
+--Variables
+DO $$
+DECLARE foo TEXT;
+BEGIN
+  foo := 'bar' ;
+  --SELECT foo;
+  raise notice '%',foo;
+  select 1 into foo;
+  raise notice '%',foo;
+END $$;
